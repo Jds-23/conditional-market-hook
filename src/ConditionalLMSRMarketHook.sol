@@ -9,9 +9,11 @@ import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/type
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {ConditionalMarkets} from "./ConditionalMarkets.sol";
+import {LMSRMath} from "./LMSRMath.sol";
 
 contract ConditionalLMSRMarketHook is BaseHook {
     error NotImplementedYet();
+    error UnknownToken();
 
     Currency public immutable collateralToken;
     Currency public immutable yesToken;
@@ -100,8 +102,16 @@ contract ConditionalLMSRMarketHook is BaseHook {
         initialized = true;
     }
 
-    function calcMarginalPrice(Currency) public pure returns (uint256) {
-        return 0;
+    function calcMarginalPrice(Currency token) public view returns (uint256) {
+        uint256 yesPrice = LMSRMath.calcMarginalPriceBinary(
+            reserves[yesToken], reserves[noToken], funding, 6
+        );
+        if (Currency.unwrap(token) == Currency.unwrap(yesToken)) {
+            return yesPrice;
+        } else if (Currency.unwrap(token) == Currency.unwrap(noToken)) {
+            return 1e18 - yesPrice;
+        }
+        revert UnknownToken();
     }
 
     function calculateBuyAmount(uint256, Currency) internal pure returns (uint256) {

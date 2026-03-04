@@ -136,6 +136,18 @@ contract ConditionalLMSRMarketHookTest is BaseTest, IUnlockCallback {
         assertEq(hook.conditionId(), CONDITION_ID);
     }
 
+    // ── Phase 2: Pricing Invariants ───────────────────────────────────────
+
+    function test_marginalPrice_equalReserves() public view {
+        assertEq(hook.calcMarginalPrice(yesCurrency), 0.5e18);
+        assertEq(hook.calcMarginalPrice(noCurrency), 0.5e18);
+    }
+
+    function test_marginalPrice_sumEqualsOne() public view {
+        uint256 sum = hook.calcMarginalPrice(yesCurrency) + hook.calcMarginalPrice(noCurrency);
+        assertApproxEqAbs(sum, 1e18, 1);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────
 
     function _makePoolKey(Currency a, Currency b) internal view returns (PoolKey memory) {
