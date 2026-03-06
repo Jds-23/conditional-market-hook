@@ -14,6 +14,11 @@ import {LMSRMath} from "./LMSRMath.sol";
 contract ConditionalLMSRMarketHook is BaseHook {
     error NotImplementedYet();
     error UnknownToken();
+    error MarketResolved();
+    error InsufficientLiquidity();
+    error OnlyExactOutputSwaps();
+    error CrossOutcomeSwapsNotSupportedYet();
+    error TokenNotWinner();
 
     Currency public immutable collateralToken;
     Currency public immutable yesToken;
@@ -61,13 +66,47 @@ contract ConditionalLMSRMarketHook is BaseHook {
         });
     }
 
-    function _beforeSwap(address, PoolKey calldata, SwapParams calldata, bytes calldata)
+    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
-        pure
+        view
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
+        Currency tokenIn = params.zeroForOne ? key.currency0 : key.currency1;
+        Currency tokenOut = params.zeroForOne ? key.currency1 : key.currency0;
+
+        bool isBuy = _currenciesEqual(tokenIn, collateralToken) && _isOutcomeToken(tokenOut);
+        bool isSell = _isOutcomeToken(tokenIn) && _currenciesEqual(tokenOut, collateralToken);
+
+        if (!isBuy && !isSell) {
+            // here implementation of this condition will go
+            revert CrossOutcomeSwapsNotSupportedYet();
+        }
+
+        if (isBuy) {
+            if (conditionalTokens.resolved(conditionId) != address(0)) revert MarketResolved();
+            if (calculateBuyAmount(uint256(-params.amountSpecified), tokenOut) == 0) revert InsufficientLiquidity();
+            // here implementation of this condition will go
+        } else {
+            address winner = conditionalTokens.resolved(conditionId);
+            if (winner == address(0)) {
+                if (params.amountSpecified <= 0) revert OnlyExactOutputSwaps();
+                if (calculateSellAmount(uint256(params.amountSpecified), tokenIn) == 0) revert InsufficientLiquidity();
+                // here implementation of this condition will go
+            } else {
+                if (winner != Currency.unwrap(tokenIn)) revert TokenNotWinner();
+                // here implementation of this condition will go
+            }
+        }
         revert NotImplementedYet();
+    }
+
+    function _isOutcomeToken(Currency token) internal view returns (bool) {
+        return _currenciesEqual(token, yesToken) || _currenciesEqual(token, noToken);
+    }
+
+    function _currenciesEqual(Currency a, Currency b) internal pure returns (bool) {
+        return Currency.unwrap(a) == Currency.unwrap(b);
     }
 
     function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)

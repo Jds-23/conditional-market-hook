@@ -15,6 +15,8 @@ import {Constants} from "@uniswap/v4-core/test/utils/Constants.sol";
 import {CurrencySettler} from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {BaseTest} from "./utils/BaseTest.sol";
 import {SimpleERC20} from "../src/SimpleERC20.sol";
 import {ConditionalMarkets} from "../src/ConditionalMarkets.sol";
@@ -146,6 +148,64 @@ contract ConditionalLMSRMarketHookTest is BaseTest, IUnlockCallback {
     function test_marginalPrice_sumEqualsOne() public view {
         uint256 sum = hook.calcMarginalPrice(yesCurrency) + hook.calcMarginalPrice(noCurrency);
         assertApproxEqAbs(sum, 1e18, 1);
+    }
+
+    // ── Phase 3: Swap Validation ────────────────────────────────────────
+
+    function test_swap_buy_reverts_when_resolved() public {
+        conditionalMarkets.resolve(CONDITION_ID, Currency.unwrap(yesCurrency));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook),
+                IHooks.beforeSwap.selector,
+                abi.encodeWithSelector(ConditionalLMSRMarketHook.MarketResolved.selector),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        swap(address(collateral), Currency.unwrap(yesCurrency), 100e6);
+    }
+
+    function test_swap_sell_preResolution_requiresExactOutput() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook),
+                IHooks.beforeSwap.selector,
+                abi.encodeWithSelector(ConditionalLMSRMarketHook.OnlyExactOutputSwaps.selector),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        swap(Currency.unwrap(yesCurrency), address(collateral), 100e6);
+    }
+
+    function test_swap_sell_postResolution_reverts_losingToken() public {
+        conditionalMarkets.resolve(CONDITION_ID, Currency.unwrap(yesCurrency));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook),
+                IHooks.beforeSwap.selector,
+                abi.encodeWithSelector(ConditionalLMSRMarketHook.TokenNotWinner.selector),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        swap(Currency.unwrap(noCurrency), address(collateral), 100e6);
+    }
+
+    function test_swap_crossOutcome_reverts() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CustomRevert.WrappedError.selector,
+                address(hook),
+                IHooks.beforeSwap.selector,
+                abi.encodeWithSelector(ConditionalLMSRMarketHook.CrossOutcomeSwapsNotSupportedYet.selector),
+                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
+            )
+        );
+        swap(Currency.unwrap(yesCurrency), Currency.unwrap(noCurrency), 100e6);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
