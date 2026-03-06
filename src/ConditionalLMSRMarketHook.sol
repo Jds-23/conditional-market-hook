@@ -5,7 +5,7 @@ import {BaseHook} from "@openzeppelin/uniswap-hooks/src/base/BaseHook.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IPoolManager, SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
+import {BeforeSwapDelta, BeforeSwapDeltaLibrary, toBeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {ConditionalMarkets} from "./ConditionalMarkets.sol";
@@ -19,6 +19,8 @@ contract ConditionalLMSRMarketHook is BaseHook {
     error OnlyExactOutputSwaps();
     error CrossOutcomeSwapsNotSupportedYet();
     error TokenNotWinner();
+
+    uint8 internal constant DECIMALS = 6;
 
     Currency public immutable collateralToken;
     Currency public immutable yesToken;
@@ -68,7 +70,6 @@ contract ConditionalLMSRMarketHook is BaseHook {
 
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
-        view
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
@@ -85,8 +86,7 @@ contract ConditionalLMSRMarketHook is BaseHook {
 
         if (isBuy) {
             if (conditionalTokens.resolved(conditionId) != address(0)) revert MarketResolved();
-            if (calculateBuyAmount(uint256(-params.amountSpecified), tokenOut) == 0) revert InsufficientLiquidity();
-            // here implementation of this condition will go
+            return _executeBuy(tokenIn, tokenOut, params);
         } else {
             address winner = conditionalTokens.resolved(conditionId);
             if (winner == address(0)) {
@@ -153,11 +153,45 @@ contract ConditionalLMSRMarketHook is BaseHook {
         revert UnknownToken();
     }
 
-    function calculateBuyAmount(uint256, Currency) internal pure returns (uint256) {
-        return 0;
+    function _executeBuy(Currency tokenIn, Currency tokenOut, SwapParams calldata params)
+        private
+        returns (bytes4, BeforeSwapDelta, uint24)
+    {
+        if (params.amountSpecified <= 0) revert OnlyExactOutputSwaps();
+        uint256 delta = uint256(params.amountSpecified);
+
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = reserves[yesToken];
+        quantities[1] = reserves[noToken];
+
+        int256[] memory amounts = new int256[](2);
+        if (_currenciesEqual(tokenOut, yesToken)) {
+            amounts[0] = int256(delta);
+            amounts[1] = 0;
+        } else {
+            amounts[0] = 0;
+            amounts[1] = int256(delta);
+        }
+
+        uint256 cost = uint256(LMSRMath.calcNetCost(quantities, amounts, funding, DECIMALS, true));
+        if (cost == 0) revert InsufficientLiquidity();
+
+        poolManager.take(tokenIn, address(this), cost);
+
+        // Provide outcome tokens to poolManager for the swapper
+        poolManager.sync(tokenOut);
+        SafeTransferLib.safeTransfer(Currency.unwrap(tokenOut), address(poolManager), delta);
+        poolManager.settle();
+
+        // Update reserves (track cumulative positions)
+        reserves[tokenOut] += delta;
+        reserves[collateralToken] += cost;
+
+        return (this.beforeSwap.selector, toBeforeSwapDelta(-int128(int256(delta)), int128(int256(cost))), 0);
     }
 
     function calculateSellAmount(uint256, Currency) internal pure returns (uint256) {
         return 0;
     }
 }
+
