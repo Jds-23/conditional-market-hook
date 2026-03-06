@@ -14,6 +14,7 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {Constants} from "@uniswap/v4-core/test/utils/Constants.sol";
 import {CurrencySettler} from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
@@ -173,11 +174,11 @@ contract ConditionalLMSRMarketHookTest is BaseTest, IUnlockCallback {
                 CustomRevert.WrappedError.selector,
                 address(hook),
                 IHooks.beforeSwap.selector,
-                abi.encodeWithSelector(ConditionalLMSRMarketHook.OnlyExactOutputSwaps.selector),
+                abi.encodeWithSelector(ConditionalLMSRMarketHook.OnlyExactInputSells.selector),
                 abi.encodeWithSelector(Hooks.HookCallFailed.selector)
             )
         );
-        swap(Currency.unwrap(yesCurrency), address(collateral), 100e6);
+        swapExactOutput(Currency.unwrap(yesCurrency), address(collateral), 100e6, type(uint256).max);
     }
 
     function test_swap_sell_postResolution_reverts_losingToken() public {
@@ -240,6 +241,45 @@ contract ConditionalLMSRMarketHookTest is BaseTest, IUnlockCallback {
         assertEq(noAfter - noBefore, deltaNO);
         assertGt(colBefore - collateral.balanceOf(address(this)), 0);
         assertEq(hook.reserves(noCurrency), INITIAL_LIQUIDITY + deltaNO);
+    }
+
+    function test_sell_yes_success() public {
+        collateral.mint(address(poolManager), INITIAL_LIQUIDITY * 10);
+
+        // Step 1: Buy YES tokens
+        uint256 deltaYes = 100e6;
+        uint256 yesBefore = IERC20(Currency.unwrap(yesCurrency)).balanceOf(address(this));
+        uint256 colBefore = collateral.balanceOf(address(this));
+
+        swapExactOutput(address(collateral), Currency.unwrap(yesCurrency), deltaYes, type(uint256).max);
+
+        uint256 yesAfterBuy = IERC20(Currency.unwrap(yesCurrency)).balanceOf(address(this));
+        uint256 colAfterBuy = collateral.balanceOf(address(this));
+
+        assertEq(yesAfterBuy - yesBefore, deltaYes, "Buy: should receive YES tokens");
+        assertGt(colBefore - colAfterBuy, 0, "Buy: should pay collateral");
+        assertEq(hook.reserves(yesCurrency), INITIAL_LIQUIDITY + deltaYes, "Hook YES reserves after buy");
+
+        // Step 2: Sell YES tokens back
+        uint256 tokensToSell = 50e6;
+        uint256 yesBeforeSell = IERC20(Currency.unwrap(yesCurrency)).balanceOf(address(this));
+        uint256 colBeforeSell = collateral.balanceOf(address(this));
+
+        // Manually provide YES tokens to poolManager by transferring them there
+        // This simulates the pm already having tokens 
+        IERC20(Currency.unwrap(yesCurrency)).transfer(address(poolManager), tokensToSell);
+
+        // Execute the sell swap
+        swap(Currency.unwrap(yesCurrency), address(collateral), tokensToSell);
+
+        uint256 yesAfterSell = IERC20(Currency.unwrap(yesCurrency)).balanceOf(address(this));
+        uint256 colAfterSell = collateral.balanceOf(address(this));
+
+        // Verify sell results
+        assertEq(yesBeforeSell - yesAfterSell, tokensToSell+tokensToSell , "Sell: YES decreased by tokens sold + transferred");
+        assertGt(colAfterSell, colBeforeSell, "Sell: should receive collateral back");
+        assertEq(hook.reserves(yesCurrency), INITIAL_LIQUIDITY + deltaYes - tokensToSell, "Hook YES reserves after sell");
+        assertLt(hook.reserves(noCurrency), INITIAL_LIQUIDITY, "Hook NO reserves should decrease after merge");
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────

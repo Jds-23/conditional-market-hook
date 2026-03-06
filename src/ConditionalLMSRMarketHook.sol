@@ -17,6 +17,7 @@ contract ConditionalLMSRMarketHook is BaseHook {
     error MarketResolved();
     error InsufficientLiquidity();
     error OnlyExactOutputSwaps();
+    error OnlyExactInputSells();
     error CrossOutcomeSwapsNotSupportedYet();
     error TokenNotWinner();
 
@@ -90,9 +91,7 @@ contract ConditionalLMSRMarketHook is BaseHook {
         } else {
             address winner = conditionalTokens.resolved(conditionId);
             if (winner == address(0)) {
-                if (params.amountSpecified <= 0) revert OnlyExactOutputSwaps();
-                if (calculateSellAmount(uint256(params.amountSpecified), tokenIn) == 0) revert InsufficientLiquidity();
-                // here implementation of this condition will go
+                return _executeSell(tokenIn, tokenOut, params);
             } else {
                 if (winner != Currency.unwrap(tokenIn)) revert TokenNotWinner();
                 // here implementation of this condition will go
@@ -190,8 +189,48 @@ contract ConditionalLMSRMarketHook is BaseHook {
         return (this.beforeSwap.selector, toBeforeSwapDelta(-int128(int256(delta)), int128(int256(cost))), 0);
     }
 
-    function calculateSellAmount(uint256, Currency) internal pure returns (uint256) {
-        return 0;
+    function _executeSell(Currency tokenIn, Currency tokenOut, SwapParams calldata params)
+        private
+        returns (bytes4, BeforeSwapDelta, uint24)
+    {
+        if (params.amountSpecified >= 0) revert OnlyExactInputSells();
+        uint256 tokensIn = uint256(-params.amountSpecified);
+
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = reserves[yesToken];
+        quantities[1] = reserves[noToken];
+
+        int256[] memory amounts = new int256[](2);
+        if (_currenciesEqual(tokenIn, yesToken)) {
+            amounts[0] = -int256(tokensIn);
+            amounts[1] = 0;
+        } else {
+            amounts[0] = 0;
+            amounts[1] = -int256(tokensIn);
+        }
+
+        int256 netCost = LMSRMath.calcNetCost(quantities, amounts, funding, DECIMALS, false);
+        if (netCost >= 0) revert InsufficientLiquidity();
+        uint256 collateralOut = uint256(-netCost);
+
+        // Take outcome tokens from PM (user settles to PM in unlockCallback)
+        poolManager.take(tokenIn, address(this), tokensIn);
+
+        // Merge YES+NO → collateral (burns from hook, no approval needed — OutcomeToken.burn is onlyOwner)
+        // Note: merge burns collateralOut amount of BOTH YES and NO tokens, regardless of which is tokenIn
+        conditionalTokens.merge(conditionId, collateralOut);
+
+        // Send collateral to PM for the swapper to take
+        poolManager.sync(tokenOut);
+        SafeTransferLib.safeTransfer(Currency.unwrap(tokenOut), address(poolManager), collateralOut);
+        poolManager.settle();
+
+        // Update reserves: collateralOut was burned from both YES and NO (the burn amount is collateralOut)
+        reserves[tokenIn] -= tokensIn;
+        reserves[_currenciesEqual(tokenIn, yesToken) ? noToken : yesToken] -= collateralOut;
+        reserves[collateralToken] -= collateralOut;
+
+        return (this.beforeSwap.selector, toBeforeSwapDelta(int128(int256(tokensIn)), -int128(int256(collateralOut))), 0);
     }
 }
 
