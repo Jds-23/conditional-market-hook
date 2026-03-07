@@ -238,5 +238,86 @@ contract ConditionalLMSRMarketHook is BaseHook {
 
         return (this.beforeSwap.selector, toBeforeSwapDelta(int128(int256(tokensIn)), -int128(int256(collateralOut))), 0);
     }
+
+    // compilation error stack too deep
+    // function _executeSwap(Currency tokenIn, Currency tokenOut, SwapParams calldata params)
+    //     private
+    //     returns (bytes4, BeforeSwapDelta, uint24)
+    // {
+    //     bool isBuy = _currenciesEqual(tokenIn, collateralToken);
+
+    //     // Validate amountSpecified sign: buy = exact-output (>0), sell = exact-input (<0)
+    //     if (isBuy && params.amountSpecified <= 0) revert OnlyExactOutputSwaps();
+    //     if (!isBuy && params.amountSpecified >= 0) revert OnlyExactInputSells();
+
+    //     Currency outcomeToken = isBuy ? tokenOut : tokenIn;
+    //     uint256 outcomeDelta = isBuy ? uint256(params.amountSpecified) : uint256(-params.amountSpecified);
+
+    //     // Build LMSR amounts: +delta for buy (adding to pool), -delta for sell (removing from pool)
+    //     uint256[] memory quantities = new uint256[](2);
+    //     quantities[0] = reserves[yesToken];
+    //     quantities[1] = reserves[noToken];
+
+    //     int256 sign = isBuy ? int256(1) : int256(-1);
+    //     int256[] memory amounts = new int256[](2);
+    //     if (_currenciesEqual(outcomeToken, yesToken)) {
+    //         amounts[0] = sign * int256(outcomeDelta);
+    //         amounts[1] = 0;
+    //     } else {
+    //         amounts[0] = 0;
+    //         amounts[1] = sign * int256(outcomeDelta);
+    //     }
+
+    //     int256 netCost = LMSRMath.calcNetCost(quantities, amounts, funding, DECIMALS, isBuy);
+    //     uint256 collateralAmount;
+    //     if (isBuy) {
+    //         if (netCost <= 0) revert InsufficientLiquidity();
+    //         collateralAmount = uint256(netCost);
+    //     } else {
+    //         if (netCost >= 0) revert InsufficientLiquidity();
+    //         collateralAmount = uint256(-netCost);
+    //     }
+
+    //     Currency otherOutcome = _currenciesEqual(outcomeToken, yesToken) ? noToken : yesToken;
+
+    //     if (isBuy) {
+    //         // Take collateral from PM, split into outcome tokens, send requested outcome to PM
+    //         poolManager.take(tokenIn, address(this), collateralAmount);
+    //         SafeTransferLib.safeApprove(
+    //             Currency.unwrap(collateralToken), address(conditionalTokens), collateralAmount
+    //         );
+    //         conditionalTokens.split(conditionId, collateralAmount);
+
+    //         poolManager.sync(tokenOut);
+    //         SafeTransferLib.safeTransfer(Currency.unwrap(tokenOut), address(poolManager), outcomeDelta);
+    //         poolManager.settle();
+
+    //         // Split adds collateralAmount to both outcomes; user takes outcomeDelta of one
+    //         reserves[outcomeToken] += collateralAmount - outcomeDelta;
+    //         reserves[otherOutcome] += collateralAmount;
+    //         reserves[collateralToken] += collateralAmount;
+    //     } else {
+    //         // Take outcome tokens from PM, merge YES+NO into collateral, send collateral to PM
+    //         poolManager.take(tokenIn, address(this), outcomeDelta);
+    //         conditionalTokens.merge(conditionId, collateralAmount);
+
+    //         poolManager.sync(tokenOut);
+    //         SafeTransferLib.safeTransfer(Currency.unwrap(tokenOut), address(poolManager), collateralAmount);
+    //         poolManager.settle();
+
+    //         // User gives outcomeDelta; merge burns collateralAmount from both outcomes
+    //         reserves[outcomeToken] += outcomeDelta - collateralAmount;
+    //         reserves[otherOutcome] -= collateralAmount;
+    //         reserves[collateralToken] -= collateralAmount;
+    //     }
+
+    //     // BeforeSwapDelta: (specifiedDelta, unspecifiedDelta)
+    //     // Buy:  specified=outcomeOut(-delta), unspecified=collateralIn(+cost)
+    //     // Sell: specified=outcomeIn(+delta),  unspecified=collateralOut(-cost)
+    //     int128 specifiedDelta = isBuy ? -int128(int256(outcomeDelta)) : int128(int256(outcomeDelta));
+    //     int128 unspecifiedDelta = isBuy ? int128(int256(collateralAmount)) : -int128(int256(collateralAmount));
+
+    //     return (this.beforeSwap.selector, toBeforeSwapDelta(specifiedDelta, unspecifiedDelta), 0);
+    // }
 }
 

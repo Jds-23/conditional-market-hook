@@ -287,6 +287,43 @@ contract ConditionalLMSRMarketHookTest is BaseTest, IUnlockCallback {
         assertEq(hook.reserves(noCurrency), (INITIAL_LIQUIDITY + buyCost) - sellCollateralOut, "Hook NO reserves after sell");
     }
 
+    function test_sell_no_success() public {
+        collateral.mint(address(poolManager), INITIAL_LIQUIDITY * 10);
+
+        // Step 1: Buy NO tokens
+        uint256 deltaNO = 200e6;
+        uint256 noBefore = IERC20(Currency.unwrap(noCurrency)).balanceOf(address(this));
+        uint256 colBefore = collateral.balanceOf(address(this));
+
+        swapExactOutput(address(collateral), Currency.unwrap(noCurrency), deltaNO, type(uint256).max);
+
+        uint256 noAfterBuy = IERC20(Currency.unwrap(noCurrency)).balanceOf(address(this));
+        uint256 colAfterBuy = collateral.balanceOf(address(this));
+
+        assertEq(noAfterBuy - noBefore, deltaNO, "Buy: should receive NO tokens");
+        assertGt(colBefore - colAfterBuy, 0, "Buy: should pay collateral");
+        uint256 buyCost = colBefore - colAfterBuy;
+
+        // Step 2: Sell NO tokens back
+        uint256 tokensToSell = 100e6;
+        uint256 noBeforeSell = IERC20(Currency.unwrap(noCurrency)).balanceOf(address(this));
+        uint256 colBeforeSell = collateral.balanceOf(address(this));
+
+        IERC20(Currency.unwrap(noCurrency)).transfer(address(poolManager), tokensToSell);
+
+        swap(Currency.unwrap(noCurrency), address(collateral), tokensToSell);
+
+        uint256 noAfterSell = IERC20(Currency.unwrap(noCurrency)).balanceOf(address(this));
+        uint256 colAfterSell = collateral.balanceOf(address(this));
+
+        // Verify
+        assertEq(noBeforeSell - noAfterSell, tokensToSell + tokensToSell, "Sell: NO decreased by tokens sold + transferred");
+        assertGt(colAfterSell, colBeforeSell, "Sell: should receive collateral back");
+        uint256 sellCollateralOut = colAfterSell - colBeforeSell;
+        assertEq(hook.reserves(noCurrency), (INITIAL_LIQUIDITY + buyCost) - deltaNO - sellCollateralOut + tokensToSell, "Hook NO reserves after sell");
+        assertEq(hook.reserves(yesCurrency), (INITIAL_LIQUIDITY + buyCost) - sellCollateralOut, "Hook YES reserves after sell");
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────
 
     function _makePoolKey(Currency a, Currency b) internal view returns (PoolKey memory) {
