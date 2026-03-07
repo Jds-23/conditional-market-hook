@@ -174,8 +174,11 @@ contract ConditionalLMSRMarketHook is BaseHook {
 
         uint256 cost = uint256(LMSRMath.calcNetCost(quantities, amounts, funding, DECIMALS, true));
         if (cost == 0) revert InsufficientLiquidity();
-
         poolManager.take(tokenIn, address(this), cost);
+        SafeTransferLib.safeApprove(
+            Currency.unwrap(collateralToken), address(conditionalTokens), cost
+        );
+        conditionalTokens.split(conditionId, cost);
 
         // Provide outcome tokens to poolManager for the swapper
         poolManager.sync(tokenOut);
@@ -183,8 +186,10 @@ contract ConditionalLMSRMarketHook is BaseHook {
         poolManager.settle();
 
         // Update reserves (track cumulative positions)
-        reserves[tokenOut] += delta;
+        reserves[tokenOut] += cost;
+        reserves[tokenOut] -= delta;
         reserves[collateralToken] += cost;
+        reserves[_currenciesEqual(tokenOut, yesToken) ? noToken : yesToken]+= cost;
 
         return (this.beforeSwap.selector, toBeforeSwapDelta(-int128(int256(delta)), int128(int256(cost))), 0);
     }

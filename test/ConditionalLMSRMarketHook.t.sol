@@ -22,6 +22,8 @@ import {BaseTest} from "./utils/BaseTest.sol";
 import {SimpleERC20} from "../src/SimpleERC20.sol";
 import {ConditionalMarkets} from "../src/ConditionalMarkets.sol";
 import {ConditionalLMSRMarketHook} from "../src/ConditionalLMSRMarketHook.sol";
+import {console} from "forge-std/console.sol";
+
 
 contract ConditionalLMSRMarketHookTest is BaseTest, IUnlockCallback {
     using CurrencyLibrary for Currency;
@@ -226,7 +228,7 @@ contract ConditionalLMSRMarketHookTest is BaseTest, IUnlockCallback {
         uint256 cost = colBefore - colAfter;
         assertGt(cost, 0);
         assertApproxEqRel(cost, deltaYes / 2, 0.1e18);
-        assertEq(hook.reserves(yesCurrency), INITIAL_LIQUIDITY + deltaYes);
+        assertEq(hook.reserves(yesCurrency), (INITIAL_LIQUIDITY+cost) - deltaYes);
     }
 
     function test_buy_no_success() public {
@@ -239,8 +241,9 @@ contract ConditionalLMSRMarketHookTest is BaseTest, IUnlockCallback {
 
         uint256 noAfter = IERC20(Currency.unwrap(noCurrency)).balanceOf(address(this));
         assertEq(noAfter - noBefore, deltaNO);
-        assertGt(colBefore - collateral.balanceOf(address(this)), 0);
-        assertEq(hook.reserves(noCurrency), INITIAL_LIQUIDITY + deltaNO);
+        uint256 cost = colBefore - collateral.balanceOf(address(this));
+        assertGt(cost, 0);
+        assertEq(hook.reserves(noCurrency), (INITIAL_LIQUIDITY+cost) - deltaNO);
     }
 
     function test_sell_yes_success() public {
