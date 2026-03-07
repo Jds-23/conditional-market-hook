@@ -153,6 +153,23 @@ contract ConditionalLMSRMarketHookTest is BaseTest, IUnlockCallback {
         assertApproxEqAbs(sum, 1e18, 1);
     }
 
+    function test_price_increases_after_buying_yes() public {
+        collateral.mint(address(poolManager), INITIAL_LIQUIDITY * 10);
+
+        uint256 priceBefore = hook.calcMarginalPrice(yesCurrency);
+        assertEq(priceBefore, 0.5e18);
+
+        swapExactOutput(address(collateral), Currency.unwrap(yesCurrency), 1000e6, type(uint256).max);
+
+        uint256 priceAfter = hook.calcMarginalPrice(yesCurrency);
+        assertGt(priceAfter, priceBefore);
+        assertApproxEqAbs(
+            hook.calcMarginalPrice(yesCurrency) + hook.calcMarginalPrice(noCurrency),
+            1e18,
+            1
+        );
+    }
+
     // ── Phase 3: Swap Validation ────────────────────────────────────────
 
     function test_swap_buy_reverts_when_resolved() public {
