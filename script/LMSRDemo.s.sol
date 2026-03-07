@@ -15,31 +15,31 @@ contract LMSRDemo is Script {
         int256[] memory amounts;
         int256 netCost;
 
-        // === Scenario 1: Buy YES from uniform zero ===
-        console.log("=== Scenario 1: Buy YES from uniform zero ===");
+        // === Scenario 1: Buy YES from uniform zero balances ===
+        console.log("=== Scenario 1: Buy YES from uniform zero balances ===");
         q = _arr(0, 0);
         amounts = _iArr(int256(10e6), 0);
-        console.log("  q = [0, 0], amounts = [10e6, 0]");
+        console.log("  balances = [0, 0], amounts = [10e6, 0]");
         console.log("  C([0,0]) =");
         console.logInt(int256(LMSRMath.calcCostFunction(q, FUNDING, DECIMALS)));
         netCost = LMSRMath.calcNetCost(q, amounts, FUNDING, DECIMALS, true);
         console.log("  netCost =");
         console.logInt(netCost);
 
-        // === Scenario 2: Buy NO from uniform zero ===
-        console.log("=== Scenario 2: Buy NO from uniform zero ===");
+        // === Scenario 2: Buy NO from uniform zero balances ===
+        console.log("=== Scenario 2: Buy NO from uniform zero balances ===");
         q = _arr(0, 0);
         amounts = _iArr(0, int256(10e6));
-        console.log("  q = [0, 0], amounts = [0, 10e6]");
+        console.log("  balances = [0, 0], amounts = [0, 10e6]");
         netCost = LMSRMath.calcNetCost(q, amounts, FUNDING, DECIMALS, true);
         console.log("  netCost =");
         console.logInt(netCost);
 
-        // === Scenario 3: Buy YES from skewed state ===
-        console.log("=== Scenario 3: Buy YES from skewed state ===");
+        // === Scenario 3: Buy YES from skewed balances ===
+        console.log("=== Scenario 3: Buy YES from skewed balances ===");
         q = _arr(80e6, 20e6);
         amounts = _iArr(int256(10e6), 0);
-        console.log("  q = [80e6, 20e6], amounts = [10e6, 0]");
+        console.log("  balances = [80e6, 20e6], amounts = [10e6, 0]");
         console.log("  C([80e6, 20e6]) =");
         console.logInt(int256(LMSRMath.calcCostFunction(q, FUNDING, DECIMALS)));
         netCost = LMSRMath.calcNetCost(q, amounts, FUNDING, DECIMALS, true);
@@ -50,7 +50,7 @@ contract LMSRDemo is Script {
         console.log("=== Scenario 4: Sell YES ===");
         q = _arr(50e6, 10e6);
         amounts = _iArr(-int256(20e6), 0);
-        console.log("  q = [50e6, 10e6], amounts = [-20e6, 0]");
+        console.log("  balances = [50e6, 10e6], amounts = [-20e6, 0]");
         netCost = LMSRMath.calcNetCost(q, amounts, FUNDING, DECIMALS, false);
         console.log("  netCost =");
         console.logInt(netCost);
@@ -59,7 +59,7 @@ contract LMSRDemo is Script {
         console.log("=== Scenario 5: Buy both (split-like) ===");
         q = _arr(0, 0);
         amounts = _iArr(int256(10e6), int256(10e6));
-        console.log("  q = [0, 0], amounts = [10e6, 10e6]");
+        console.log("  balances = [0, 0], amounts = [10e6, 10e6]");
         netCost = LMSRMath.calcNetCost(q, amounts, FUNDING, DECIMALS, true);
         console.log("  netCost =");
         console.logInt(netCost);

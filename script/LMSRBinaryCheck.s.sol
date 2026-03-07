@@ -13,9 +13,9 @@ contract LMSRBinaryCheck is Script {
     function run() external pure {
         // ── NetCost comparisons ──────────────────────────────────
 
-        // Scenario 1: Buy YES from zero
+        // Scenario 1: Buy YES from zero balances
         {
-            console.log("=== Scenario 1: NetCost - Buy YES from zero ===");
+            console.log("=== Scenario 1: NetCost - Buy YES from zero balances ===");
             uint256 balYes = 0;
             uint256 balNo = 0;
             int256 deltaYes = int256(10e6);
@@ -32,9 +32,9 @@ contract LMSRBinaryCheck is Script {
             console.log("  match    =", generic == binary);
         }
 
-        // Scenario 2: Buy YES from skew
+        // Scenario 2: Buy YES from skewed balances
         {
-            console.log("=== Scenario 2: NetCost - Buy YES from skew ===");
+            console.log("=== Scenario 2: NetCost - Buy YES from skewed balances ===");
             uint256 balYes = 80e6;
             uint256 balNo = 20e6;
             int256 deltaYes = int256(10e6);

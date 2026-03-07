@@ -66,12 +66,12 @@ library LMSRMath {
         int256 bWad = _computeB(funding, n, decimals);
         int256 scale = int256(10 ** uint256(decimals));
 
-        uint256 maxQ = _max(quantities);
+        uint256 minQ = _min(quantities);
 
-        uint256 sumExp = _sumExpShifted(quantities, maxQ, bWad, scale);
+        uint256 sumExp = _sumExpShiftedNeg(quantities, minQ, bWad, scale);
 
-        // price_i = exp((q_i - maxQ) / b) / sumExp
-        int256 diff = (int256(quantities[outcomeIndex]) - int256(maxQ)) * WAD / scale;
+        // price_i = exp((minQ - q_i) / b) / sumExp  (negated convention)
+        int256 diff = (int256(minQ) - int256(quantities[outcomeIndex])) * WAD / scale;
         int256 ratio = diff * WAD / bWad;
         uint256 expVal = uint256(FixedPointMathLib.expWad(ratio));
 
@@ -79,47 +79,43 @@ library LMSRMath {
     }
 
     /// @notice Compute the net cost of a trade: C(q + delta) - C(q)
-    /// @param quantities Current token quantities per outcome
+    /// @param balances Current token balances per outcome
     /// @param amounts Trade amounts per outcome (positive=buy, negative=sell)
     /// @param funding Market funding amount
     /// @param decimals Token decimal places
     /// @param roundUp If true, round in favor of the protocol
     /// @return netCost Signed cost (positive=trader pays, negative=trader receives)
     function calcNetCost(
-        uint256[] memory quantities,
+        uint256[] memory balances,
         int256[] memory amounts,
         uint256 funding,
         uint8 decimals,
         bool roundUp
     ) internal pure returns (int256 netCost) {
-        uint256 n = quantities.length;
+        uint256 n = balances.length;
         if (n != amounts.length) revert ArrayLengthMismatch();
         _validateInputs(n, funding, decimals);
 
-        uint256 costBefore = calcCostFunction(quantities, funding, decimals);
+        int256 bWad = _computeB(funding, n, decimals);
+        int256 scale = int256(10 ** uint256(decimals));
 
-        uint256[] memory afterQuantities = new uint256[](n);
+        // Build signed vectors: qBefore = -balances, qAfter = amounts - balances
+        int256[] memory qBefore = new int256[](n);
+        int256[] memory qAfter = new int256[](n);
         for (uint256 i; i < n; ++i) {
-            int256 afterQ = int256(quantities[i]) + amounts[i];
-            require(afterQ >= 0, "negative quantity");
-            afterQuantities[i] = uint256(afterQ);
+            qBefore[i] = -int256(balances[i]);
+            qAfter[i] = amounts[i] - int256(balances[i]);
         }
 
-        uint256 costAfter = calcCostFunction(afterQuantities, funding, decimals);
-
-        netCost = int256(costAfter) - int256(costBefore);
+        int256 costBefore = _costFunctionWadSigned(qBefore, bWad, scale);
+        int256 costAfter = _costFunctionWadSigned(qAfter, bWad, scale);
+        int256 netCostWad = costAfter - costBefore;
+        netCost = netCostWad * scale / WAD;
 
         if (roundUp && netCost > 0) {
-            // Recompute with WAD precision to check for rounding remainder
-            int256 bWad = _computeB(funding, n, decimals);
-            int256 scale = int256(10 ** uint256(decimals));
-            int256 costBeforeWad = _costFunctionWad(quantities, bWad, scale);
-            int256 costAfterWad = _costFunctionWad(afterQuantities, bWad, scale);
-            int256 netCostWad = costAfterWad - costBeforeWad;
-            int256 truncated = netCostWad * scale / WAD;
             // If there's a fractional remainder, round up
-            if (netCostWad * scale != truncated * WAD) {
-                netCost = truncated + 1;
+            if (netCostWad * scale != netCost * WAD) {
+                netCost += 1;
             }
         }
     }
@@ -145,7 +141,7 @@ library LMSRMath {
 
         // price_yes = exp(qY/b) / (exp(qY/b) + exp(qN/b))
         // With offset: subtract max(qY, qN)/b
-        int256 diff = (int256(balanceYes) - int256(balanceNo)) * WAD / scale;
+        int256 diff = (int256(balanceNo) - int256(balanceYes)) * WAD / scale;
         int256 ratio = diff * WAD / bWad;
 
         // price = exp(ratio) / (exp(ratio) + exp(0)) when qY >= qN (ratio ≥ 0)
@@ -246,6 +242,67 @@ library LMSRMath {
         int256 maxQWad = int256(maxQ) * WAD / scale;
 
         uint256 sumExp = _sumExpShifted(quantities, maxQ, bWad, scale);
+
+        int256 lnSum = FixedPointMathLib.lnWad(int256(sumExp));
+        return maxQWad + _sMulWad(bWad, lnSum);
+    }
+
+    /// @dev Find minimum value in array
+    function _min(uint256[] memory arr) private pure returns (uint256 m) {
+        m = arr[0];
+        for (uint256 i = 1; i < arr.length; ++i) {
+            if (arr[i] < m) m = arr[i];
+        }
+    }
+
+    /// @dev Compute Σ exp((minQ - qᵢ) / b) — negated convention offset trick
+    function _sumExpShiftedNeg(
+        uint256[] memory quantities,
+        uint256 minQ,
+        int256 bWad,
+        int256 scale
+    ) private pure returns (uint256 sumExp) {
+        for (uint256 i; i < quantities.length; ++i) {
+            int256 diff = (int256(minQ) - int256(quantities[i])) * WAD / scale;
+            int256 ratio = diff * WAD / bWad;
+            int256 expVal = FixedPointMathLib.expWad(ratio);
+            sumExp += uint256(expVal);
+        }
+    }
+
+    /// @dev Find maximum value in signed array
+    function _maxSigned(int256[] memory arr) private pure returns (int256 m) {
+        m = arr[0];
+        for (uint256 i = 1; i < arr.length; ++i) {
+            if (arr[i] > m) m = arr[i];
+        }
+    }
+
+    /// @dev Compute Σ exp((qᵢ - maxQ) / b) for signed inputs
+    function _sumExpShiftedSigned(
+        int256[] memory quantities,
+        int256 maxQ,
+        int256 bWad,
+        int256 scale
+    ) private pure returns (uint256 sumExp) {
+        for (uint256 i; i < quantities.length; ++i) {
+            int256 diff = (quantities[i] - maxQ) * WAD / scale;
+            int256 ratio = diff * WAD / bWad;
+            int256 expVal = FixedPointMathLib.expWad(ratio);
+            sumExp += uint256(expVal);
+        }
+    }
+
+    /// @dev Compute cost function C(q) for signed inputs, returning WAD precision
+    function _costFunctionWadSigned(
+        int256[] memory quantities,
+        int256 bWad,
+        int256 scale
+    ) private pure returns (int256) {
+        int256 maxQ = _maxSigned(quantities);
+        int256 maxQWad = maxQ * WAD / scale;
+
+        uint256 sumExp = _sumExpShiftedSigned(quantities, maxQ, bWad, scale);
 
         int256 lnSum = FixedPointMathLib.lnWad(int256(sumExp));
         return maxQWad + _sMulWad(bWad, lnSum);
