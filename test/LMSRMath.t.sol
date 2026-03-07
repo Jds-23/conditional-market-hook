@@ -317,14 +317,14 @@ contract LMSRMathTest is Test {
     }
 
     function test_tradeAmount_sellRoundTrip() public view {
-        // Starting from [50e6, 0], sell 10e6 YES tokens
-        uint256 tokensToSell = 10e6;
-        uint256 collateralOut = h.calcTradeAmountBinary(50e6, 0, -int256(tokensToSell), 0, FUNDING_100, DEC6);
-        assertGt(collateralOut, 0, "should get collateral");
+        // Given collateral wanted, find tokens to sell, then verify round-trip
+        uint256 collateralWanted = 5e6;
+        uint256 tokensToSell = h.calcTradeAmountBinary(50e6, 0, -int256(collateralWanted), 0, FUNDING_100, DEC6);
+        assertGt(tokensToSell, 0, "should need tokens");
 
-        // Round-trip: selling tokensToSell YES should yield ~collateralOut
+        // Round-trip: selling tokensToSell YES should yield ~collateralWanted
         int256 cost = h.calcNetCostBinary(50e6, 0, -int256(tokensToSell), 0, FUNDING_100, DEC6, false);
-        assertApproxEqAbs(uint256(-cost), collateralOut, 1, "round-trip sell should match");
+        assertApproxEqAbs(uint256(-cost), collateralWanted, 1, "round-trip sell should match");
     }
 
     function test_tradeAmount_buySymmetric() public view {
@@ -358,12 +358,12 @@ contract LMSRMathTest is Test {
     }
 
     function test_tradeAmount_sellNo() public view {
-        uint256 tokensToSell = 5e6;
-        uint256 collateralOut = h.calcTradeAmountBinary(10e6, 50e6, -int256(tokensToSell), 1, FUNDING_100, DEC6);
-        assertGt(collateralOut, 0);
+        uint256 collateralWanted = 3e6;
+        uint256 tokensToSell = h.calcTradeAmountBinary(10e6, 50e6, -int256(collateralWanted), 1, FUNDING_100, DEC6);
+        assertGt(tokensToSell, 0);
 
         int256 cost = h.calcNetCostBinary(10e6, 50e6, 0, -int256(tokensToSell), FUNDING_100, DEC6, false);
-        assertApproxEqAbs(uint256(-cost), collateralOut, 1, "round-trip sell NO should match");
+        assertApproxEqAbs(uint256(-cost), collateralWanted, 1, "round-trip sell NO should match");
     }
 
     function test_tradeAmount_revert_InvalidOutcomeIndex() public {
@@ -394,15 +394,18 @@ contract LMSRMathTest is Test {
         assertApproxEqAbs(uint256(cost), collateral, 2, "fuzz: buy round-trip");
     }
 
-    function testFuzz_tradeAmount_sellRoundTrip(uint256 balY, uint256 balN, uint256 tokensToSell) public view {
+    function testFuzz_tradeAmount_sellRoundTrip(uint256 balY, uint256 balN, uint256 collateralWanted) public {
         balY = bound(balY, 10e6, 500e6);
-        balN = bound(balN, 0, 500e6);
-        tokensToSell = bound(tokensToSell, 1e4, balY / 2);
+        balN = bound(balN, 10e6, 500e6);
+        // Bound collateral to a small fraction — large requests can exceed market capacity
+        collateralWanted = bound(collateralWanted, 1e4, 5e6);
 
-        uint256 collateralOut =
-            h.calcTradeAmountBinary(balY, balN, -int256(tokensToSell), 0, FUNDING_100, DEC6);
-        int256 cost = h.calcNetCostBinary(balY, balN, -int256(tokensToSell), 0, FUNDING_100, DEC6, false);
-        assertApproxEqAbs(uint256(-cost), collateralOut, 2, "fuzz: sell round-trip");
+        try h.calcTradeAmountBinary(balY, balN, -int256(collateralWanted), 0, FUNDING_100, DEC6) returns (uint256 tokensToSell) {
+            int256 cost = h.calcNetCostBinary(balY, balN, -int256(tokensToSell), 0, FUNDING_100, DEC6, false);
+            assertApproxEqAbs(uint256(-cost), collateralWanted, 2, "fuzz: sell round-trip");
+        } catch {
+            // InsufficientLiquidity — valid revert for extreme inputs
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════

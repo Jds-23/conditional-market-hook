@@ -187,17 +187,83 @@ contract ConditionalLMSRMarketHookTest is BaseTest, IUnlockCallback {
         swap(address(collateral), Currency.unwrap(yesCurrency), 100e6);
     }
 
-    function test_swap_sell_preResolution_requiresExactOutput() public {
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                CustomRevert.WrappedError.selector,
-                address(hook),
-                IHooks.beforeSwap.selector,
-                abi.encodeWithSelector(ConditionalLMSRMarketHook.OnlyExactInputSells.selector),
-                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
-            )
-        );
-        swapExactOutput(Currency.unwrap(yesCurrency), address(collateral), 100e6, type(uint256).max);
+    function test_buy_yes_exactInput_success() public {
+        collateral.mint(address(poolManager), INITIAL_LIQUIDITY * 10);
+        uint256 collateralToSpend = 50e6;
+        uint256 yesBefore = IERC20(Currency.unwrap(yesCurrency)).balanceOf(address(this));
+        uint256 colBefore = collateral.balanceOf(address(this));
+
+        swap(address(collateral), Currency.unwrap(yesCurrency), collateralToSpend);
+
+        uint256 yesAfter = IERC20(Currency.unwrap(yesCurrency)).balanceOf(address(this));
+        uint256 colAfter = collateral.balanceOf(address(this));
+
+        uint256 tokensReceived = yesAfter - yesBefore;
+        assertGt(tokensReceived, 0, "should receive YES tokens");
+        assertEq(colBefore - colAfter, collateralToSpend, "should pay exact collateral");
+        // At 50/50 price, tokens received > collateral spent (LMSR property)
+        assertGt(tokensReceived, collateralToSpend, "tokens > collateral at fair price");
+    }
+
+    function test_buy_no_exactInput_success() public {
+        collateral.mint(address(poolManager), INITIAL_LIQUIDITY * 10);
+        uint256 collateralToSpend = 50e6;
+        uint256 noBefore = IERC20(Currency.unwrap(noCurrency)).balanceOf(address(this));
+        uint256 colBefore = collateral.balanceOf(address(this));
+
+        swap(address(collateral), Currency.unwrap(noCurrency), collateralToSpend);
+
+        uint256 noAfter = IERC20(Currency.unwrap(noCurrency)).balanceOf(address(this));
+        uint256 colAfter = collateral.balanceOf(address(this));
+
+        uint256 tokensReceived = noAfter - noBefore;
+        assertGt(tokensReceived, 0, "should receive NO tokens");
+        assertEq(colBefore - colAfter, collateralToSpend, "should pay exact collateral");
+    }
+
+    function test_sell_yes_exactOutput_success() public {
+        collateral.mint(address(poolManager), INITIAL_LIQUIDITY * 10);
+
+        // Step 1: Buy YES tokens
+        swapExactOutput(address(collateral), Currency.unwrap(yesCurrency), 200e6, type(uint256).max);
+
+        // Step 2: Sell YES for exact collateral output
+        uint256 collateralWanted = 30e6;
+        uint256 yesBefore = IERC20(Currency.unwrap(yesCurrency)).balanceOf(address(this));
+        uint256 colBefore = collateral.balanceOf(address(this));
+
+        // Pre-transfer YES tokens to PM (enough to cover the sell)
+        IERC20(Currency.unwrap(yesCurrency)).transfer(address(poolManager), 200e6);
+
+        swapExactOutput(Currency.unwrap(yesCurrency), address(collateral), collateralWanted, type(uint256).max);
+
+        uint256 colAfter = collateral.balanceOf(address(this));
+        uint256 yesAfter = IERC20(Currency.unwrap(yesCurrency)).balanceOf(address(this));
+
+        assertEq(colAfter - colBefore, collateralWanted, "should receive exact collateral");
+        assertGt(yesBefore - yesAfter, 0, "should spend YES tokens");
+    }
+
+    function test_sell_no_exactOutput_success() public {
+        collateral.mint(address(poolManager), INITIAL_LIQUIDITY * 10);
+
+        // Step 1: Buy NO tokens
+        swapExactOutput(address(collateral), Currency.unwrap(noCurrency), 200e6, type(uint256).max);
+
+        // Step 2: Sell NO for exact collateral output
+        uint256 collateralWanted = 30e6;
+        uint256 noBefore = IERC20(Currency.unwrap(noCurrency)).balanceOf(address(this));
+        uint256 colBefore = collateral.balanceOf(address(this));
+
+        IERC20(Currency.unwrap(noCurrency)).transfer(address(poolManager), 200e6);
+
+        swapExactOutput(Currency.unwrap(noCurrency), address(collateral), collateralWanted, type(uint256).max);
+
+        uint256 colAfter = collateral.balanceOf(address(this));
+        uint256 noAfter = IERC20(Currency.unwrap(noCurrency)).balanceOf(address(this));
+
+        assertEq(colAfter - colBefore, collateralWanted, "should receive exact collateral");
+        assertGt(noBefore - noAfter, 0, "should spend NO tokens");
     }
 
     function test_swap_sell_postResolution_reverts_losingToken() public {

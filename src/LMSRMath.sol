@@ -17,6 +17,7 @@ library LMSRMath {
     error ArrayLengthMismatch();
     error InvalidDecimals();
     error InvalidOutcomeIndex();
+    error InsufficientLiquidity();
 
     /// @notice Compute the LMSR cost function C(q) = b·ln(Σ exp(qᵢ/b))
     /// @param quantities Token quantities per outcome (in token decimals)
@@ -189,14 +190,14 @@ library LMSRMath {
         netCost = calcNetCost(quantities, amounts, funding, decimals, roundUp);
     }
 
-    /// @notice Compute the trade amount for a binary market given collateral or tokens
+    /// @notice Compute the trade amount for a binary market given collateral
     /// @param balanceYes Current YES token balance
     /// @param balanceNo Current NO token balance
-    /// @param amount Positive = collateral to spend (buy), negative = tokens to sell
+    /// @param amount Positive = collateral to spend (buy), negative = collateral to get back by selling (sell)
     /// @param outcomeIndex 0 = YES, 1 = NO
     /// @param funding Market funding amount
     /// @param decimals Token decimal places
-    /// @return result Tokens received (buy) or collateral received (sell), rounded down
+    /// @return result Tokens received (buy) or tokens to sell (sell), rounded down
     function calcTradeAmountBinary(
         uint256 balanceYes,
         uint256 balanceNo,
@@ -230,17 +231,20 @@ library LMSRMath {
             int256 deltaWad = _sMulWad(bWad, lnRatio);
             result = uint256(deltaWad) * uint256(scale) / uint256(WAD);
         } else {
-            // Sell: collateralOut = b·ln(S' / (S' - E_j' + E_j'·exp(-δ/b)))
-            int256 negDeltaOverB = -int256(uint256(-amount)) * WAD / scale * WAD / bWad;
-            uint256 expNDB = uint256(FixedPointMathLib.expWad(negDeltaOverB));
+            // Sell inverse: given collateral c to get back, find tokens δ to sell
+            // δ = -b·ln((S'·exp(-c/b) - S' + E_j') / E_j')
+            int256 negCOverB = -int256(uint256(-amount)) * WAD / scale * WAD / bWad;
+            uint256 expNCB = uint256(FixedPointMathLib.expWad(negCOverB));
 
-            uint256 denominator = sPrime - ejPrime + ejPrime.mulWad(expNDB);
+            uint256 sPrimeScaled = sPrime.mulWad(expNCB);
+            if (ejPrime + sPrimeScaled < sPrime) revert InsufficientLiquidity();
+            uint256 numerator = ejPrime + sPrimeScaled - sPrime;
 
             int256 lnRatio =
-                FixedPointMathLib.lnWad(int256(sPrime)) - FixedPointMathLib.lnWad(int256(denominator));
+                FixedPointMathLib.lnWad(int256(ejPrime)) - FixedPointMathLib.lnWad(int256(numerator));
 
-            int256 collateralWad = _sMulWad(bWad, lnRatio);
-            result = uint256(collateralWad) * uint256(scale) / uint256(WAD);
+            int256 deltaWad = _sMulWad(bWad, lnRatio);
+            result = uint256(deltaWad) * uint256(scale) / uint256(WAD);
         }
     }
 
