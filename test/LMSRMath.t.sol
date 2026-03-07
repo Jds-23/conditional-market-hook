@@ -53,6 +53,17 @@ contract LMSRMathHarness {
     ) external pure returns (int256) {
         return LMSRMath.calcNetCostBinary(balanceYes, balanceNo, deltaYes, deltaNo, funding, decimals, roundUp);
     }
+
+    function calcTradeAmountBinary(
+        uint256 balanceYes,
+        uint256 balanceNo,
+        int256 amount,
+        uint256 outcomeIndex,
+        uint256 funding,
+        uint8 decimals
+    ) external pure returns (uint256) {
+        return LMSRMath.calcTradeAmountBinary(balanceYes, balanceNo, amount, outcomeIndex, funding, decimals);
+    }
 }
 
 contract LMSRMathTest is Test {
@@ -287,6 +298,111 @@ contract LMSRMathTest is Test {
         int256 costDown = h.calcNetCostBinary(0, 0, 10e6, 0, FUNDING_100, DEC6, false);
         int256 costUp = h.calcNetCostBinary(0, 0, 10e6, 0, FUNDING_100, DEC6, true);
         assertGe(costUp, costDown);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Phase 5b: calcTradeAmountBinary
+    // ═══════════════════════════════════════════════════════════════════
+
+    function test_tradeAmount_buyRoundTrip() public view {
+        // Buy: given 10 USDC collateral, how many YES tokens?
+        // Then verify: calcNetCostBinary with that delta ≈ 10 USDC
+        uint256 collateral = 10e6;
+        uint256 tokensOut = h.calcTradeAmountBinary(0, 0, int256(collateral), 0, FUNDING_100, DEC6);
+        assertGt(tokensOut, 0, "should get tokens");
+
+        // Round-trip: buying tokensOut YES should cost ~collateral
+        int256 cost = h.calcNetCostBinary(0, 0, int256(tokensOut), 0, FUNDING_100, DEC6, false);
+        assertApproxEqAbs(uint256(cost), collateral, 1, "round-trip buy should match");
+    }
+
+    function test_tradeAmount_sellRoundTrip() public view {
+        // Starting from [50e6, 0], sell 10e6 YES tokens
+        uint256 tokensToSell = 10e6;
+        uint256 collateralOut = h.calcTradeAmountBinary(50e6, 0, -int256(tokensToSell), 0, FUNDING_100, DEC6);
+        assertGt(collateralOut, 0, "should get collateral");
+
+        // Round-trip: selling tokensToSell YES should yield ~collateralOut
+        int256 cost = h.calcNetCostBinary(50e6, 0, -int256(tokensToSell), 0, FUNDING_100, DEC6, false);
+        assertApproxEqAbs(uint256(-cost), collateralOut, 1, "round-trip sell should match");
+    }
+
+    function test_tradeAmount_buySymmetric() public view {
+        // Equal balances → buying YES and NO with same collateral should give same tokens
+        uint256 collateral = 20e6;
+        uint256 tokensYes = h.calcTradeAmountBinary(0, 0, int256(collateral), 0, FUNDING_100, DEC6);
+        uint256 tokensNo = h.calcTradeAmountBinary(0, 0, int256(collateral), 1, FUNDING_100, DEC6);
+        assertEq(tokensYes, tokensNo, "symmetric balances -> symmetric tokens");
+    }
+
+    function test_tradeAmount_buyMoreThanCollateral() public view {
+        // At 50/50 price, tokens received > collateral (LMSR property)
+        uint256 collateral = 10e6;
+        uint256 tokens = h.calcTradeAmountBinary(0, 0, int256(collateral), 0, FUNDING_100, DEC6);
+        assertGt(tokens, collateral, "tokens > collateral at fair price");
+    }
+
+    function test_tradeAmount_zeroAmount() public view {
+        uint256 result = h.calcTradeAmountBinary(0, 0, 0, 0, FUNDING_100, DEC6);
+        assertEq(result, 0, "zero amount -> zero result");
+    }
+
+    function test_tradeAmount_buyNo() public view {
+        // Buy NO tokens and round-trip verify
+        uint256 collateral = 15e6;
+        uint256 tokensOut = h.calcTradeAmountBinary(30e6, 10e6, int256(collateral), 1, FUNDING_100, DEC6);
+        assertGt(tokensOut, 0);
+
+        int256 cost = h.calcNetCostBinary(30e6, 10e6, 0, int256(tokensOut), FUNDING_100, DEC6, false);
+        assertApproxEqAbs(uint256(cost), collateral, 1, "round-trip buy NO should match");
+    }
+
+    function test_tradeAmount_sellNo() public view {
+        uint256 tokensToSell = 5e6;
+        uint256 collateralOut = h.calcTradeAmountBinary(10e6, 50e6, -int256(tokensToSell), 1, FUNDING_100, DEC6);
+        assertGt(collateralOut, 0);
+
+        int256 cost = h.calcNetCostBinary(10e6, 50e6, 0, -int256(tokensToSell), FUNDING_100, DEC6, false);
+        assertApproxEqAbs(uint256(-cost), collateralOut, 1, "round-trip sell NO should match");
+    }
+
+    function test_tradeAmount_revert_InvalidOutcomeIndex() public {
+        vm.expectRevert(LMSRMath.InvalidOutcomeIndex.selector);
+        h.calcTradeAmountBinary(0, 0, 10e6, 2, FUNDING_100, DEC6);
+    }
+
+    function test_tradeAmount_revert_ZeroFunding() public {
+        vm.expectRevert(LMSRMath.ZeroFunding.selector);
+        h.calcTradeAmountBinary(0, 0, 10e6, 0, 0, DEC6);
+    }
+
+    function test_tradeAmount_asymmetricBalances() public view {
+        // With high YES balance (cheap YES), buying YES should give more tokens per collateral
+        uint256 collateral = 10e6;
+        uint256 tokensFair = h.calcTradeAmountBinary(0, 0, int256(collateral), 0, FUNDING_100, DEC6);
+        uint256 tokensCheap = h.calcTradeAmountBinary(100e6, 0, int256(collateral), 0, FUNDING_100, DEC6);
+        assertGt(tokensCheap, tokensFair, "cheaper outcome -> more tokens per collateral");
+    }
+
+    function testFuzz_tradeAmount_buyRoundTrip(uint256 balY, uint256 balN, uint256 collateral) public view {
+        balY = bound(balY, 0, 500e6);
+        balN = bound(balN, 0, 500e6);
+        collateral = bound(collateral, 1e4, 200e6);
+
+        uint256 tokensOut = h.calcTradeAmountBinary(balY, balN, int256(collateral), 0, FUNDING_100, DEC6);
+        int256 cost = h.calcNetCostBinary(balY, balN, int256(tokensOut), 0, FUNDING_100, DEC6, false);
+        assertApproxEqAbs(uint256(cost), collateral, 2, "fuzz: buy round-trip");
+    }
+
+    function testFuzz_tradeAmount_sellRoundTrip(uint256 balY, uint256 balN, uint256 tokensToSell) public view {
+        balY = bound(balY, 10e6, 500e6);
+        balN = bound(balN, 0, 500e6);
+        tokensToSell = bound(tokensToSell, 1e4, balY / 2);
+
+        uint256 collateralOut =
+            h.calcTradeAmountBinary(balY, balN, -int256(tokensToSell), 0, FUNDING_100, DEC6);
+        int256 cost = h.calcNetCostBinary(balY, balN, -int256(tokensToSell), 0, FUNDING_100, DEC6, false);
+        assertApproxEqAbs(uint256(-cost), collateralOut, 2, "fuzz: sell round-trip");
     }
 
     // ═══════════════════════════════════════════════════════════════════

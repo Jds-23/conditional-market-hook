@@ -189,6 +189,61 @@ library LMSRMath {
         netCost = calcNetCost(quantities, amounts, funding, decimals, roundUp);
     }
 
+    /// @notice Compute the trade amount for a binary market given collateral or tokens
+    /// @param balanceYes Current YES token balance
+    /// @param balanceNo Current NO token balance
+    /// @param amount Positive = collateral to spend (buy), negative = tokens to sell
+    /// @param outcomeIndex 0 = YES, 1 = NO
+    /// @param funding Market funding amount
+    /// @param decimals Token decimal places
+    /// @return result Tokens received (buy) or collateral received (sell), rounded down
+    function calcTradeAmountBinary(
+        uint256 balanceYes,
+        uint256 balanceNo,
+        int256 amount,
+        uint256 outcomeIndex,
+        uint256 funding,
+        uint8 decimals
+    ) internal pure returns (uint256 result) {
+        if (funding == 0) revert ZeroFunding();
+        if (decimals == 0 || decimals > 18) revert InvalidDecimals();
+        if (outcomeIndex > 1) revert InvalidOutcomeIndex();
+        if (amount == 0) return 0;
+
+        int256 scale = int256(10 ** uint256(decimals));
+        int256 lnTwo = FixedPointMathLib.lnWad(2 * WAD);
+        int256 bWad = int256(funding) * WAD / scale * WAD / lnTwo;
+
+        (uint256 sPrime, uint256 ejPrime) =
+            _computeSumAndOutcomeExpBinary(balanceYes, balanceNo, outcomeIndex, bWad, scale);
+
+        if (amount > 0) {
+            // Buy: δ = b·ln((S'·exp(c/b) - S' + E_j') / E_j')
+            int256 cOverB = int256(uint256(amount)) * WAD / scale * WAD / bWad;
+            uint256 expCB = uint256(FixedPointMathLib.expWad(cOverB));
+
+            uint256 numerator = sPrime.mulWad(expCB) - sPrime + ejPrime;
+
+            int256 lnRatio =
+                FixedPointMathLib.lnWad(int256(numerator)) - FixedPointMathLib.lnWad(int256(ejPrime));
+
+            int256 deltaWad = _sMulWad(bWad, lnRatio);
+            result = uint256(deltaWad) * uint256(scale) / uint256(WAD);
+        } else {
+            // Sell: collateralOut = b·ln(S' / (S' - E_j' + E_j'·exp(-δ/b)))
+            int256 negDeltaOverB = -int256(uint256(-amount)) * WAD / scale * WAD / bWad;
+            uint256 expNDB = uint256(FixedPointMathLib.expWad(negDeltaOverB));
+
+            uint256 denominator = sPrime - ejPrime + ejPrime.mulWad(expNDB);
+
+            int256 lnRatio =
+                FixedPointMathLib.lnWad(int256(sPrime)) - FixedPointMathLib.lnWad(int256(denominator));
+
+            int256 collateralWad = _sMulWad(bWad, lnRatio);
+            result = uint256(collateralWad) * uint256(scale) / uint256(WAD);
+        }
+    }
+
     // ─── Internal Helpers ───────────────────────────────────────────────
 
     function _validateInputs(uint256 n, uint256 funding, uint8 decimals) private pure {
@@ -306,5 +361,26 @@ library LMSRMath {
 
         int256 lnSum = FixedPointMathLib.lnWad(int256(sumExp));
         return maxQWad + _sMulWad(bWad, lnSum);
+    }
+
+    /// @dev Compute shifted sum S' and outcome exp E_j' for binary market
+    /// Uses offset trick: factor out exp(-minBal/b) so all exponents are ≤ 0
+    function _computeSumAndOutcomeExpBinary(
+        uint256 balanceYes,
+        uint256 balanceNo,
+        uint256 outcomeIndex,
+        int256 bWad,
+        int256 scale
+    ) private pure returns (uint256 sPrime, uint256 ejPrime) {
+        uint256 minBal = balanceYes < balanceNo ? balanceYes : balanceNo;
+
+        int256 ratioYes = -int256(balanceYes - minBal) * WAD / scale * WAD / bWad;
+        uint256 expYes = uint256(FixedPointMathLib.expWad(ratioYes));
+
+        int256 ratioNo = -int256(balanceNo - minBal) * WAD / scale * WAD / bWad;
+        uint256 expNo = uint256(FixedPointMathLib.expWad(ratioNo));
+
+        sPrime = expYes + expNo;
+        ejPrime = outcomeIndex == 0 ? expYes : expNo;
     }
 }
