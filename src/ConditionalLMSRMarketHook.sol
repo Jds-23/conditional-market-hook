@@ -231,7 +231,8 @@ contract ConditionalLMSRMarketHook is BaseHook {
         poolManager.settle();
 
         // Update reserves: collateralOut was burned from both YES and NO (the burn amount is collateralOut)
-        reserves[tokenIn] -= tokensIn;
+        reserves[tokenIn] += tokensIn;
+        reserves[tokenIn] -= collateralOut;
         reserves[_currenciesEqual(tokenIn, yesToken) ? noToken : yesToken] -= collateralOut;
         reserves[collateralToken] -= collateralOut;
 

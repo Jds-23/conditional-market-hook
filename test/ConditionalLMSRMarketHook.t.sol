@@ -261,7 +261,8 @@ contract ConditionalLMSRMarketHookTest is BaseTest, IUnlockCallback {
 
         assertEq(yesAfterBuy - yesBefore, deltaYes, "Buy: should receive YES tokens");
         assertGt(colBefore - colAfterBuy, 0, "Buy: should pay collateral");
-        assertEq(hook.reserves(yesCurrency), INITIAL_LIQUIDITY + deltaYes, "Hook YES reserves after buy");
+        uint256 buyCost = colBefore - colAfterBuy;
+        assertEq(hook.reserves(yesCurrency), (INITIAL_LIQUIDITY + buyCost) - deltaYes, "Hook YES reserves after buy");
 
         // Step 2: Sell YES tokens back
         uint256 tokensToSell = 50e6;
@@ -281,8 +282,9 @@ contract ConditionalLMSRMarketHookTest is BaseTest, IUnlockCallback {
         // Verify sell results
         assertEq(yesBeforeSell - yesAfterSell, tokensToSell+tokensToSell , "Sell: YES decreased by tokens sold + transferred");
         assertGt(colAfterSell, colBeforeSell, "Sell: should receive collateral back");
-        assertEq(hook.reserves(yesCurrency), INITIAL_LIQUIDITY + deltaYes - tokensToSell, "Hook YES reserves after sell");
-        assertLt(hook.reserves(noCurrency), INITIAL_LIQUIDITY, "Hook NO reserves should decrease after merge");
+        uint256 sellCollateralOut = colAfterSell - colBeforeSell;
+        assertEq(hook.reserves(yesCurrency), (INITIAL_LIQUIDITY + buyCost) - deltaYes - sellCollateralOut+tokensToSell, "Hook YES reserves after sell");
+        assertEq(hook.reserves(noCurrency), (INITIAL_LIQUIDITY + buyCost) - sellCollateralOut, "Hook NO reserves after sell");
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
