@@ -18,7 +18,7 @@ contract ConditionalLMSRMarketHook is BaseHook {
     error InsufficientLiquidity();
     error OnlyExactOutputSwaps();
     error OnlyExactInputSells();
-    error OnlyExactInputRedemptions();
+
     error CrossOutcomeSwapsNotSupportedYet();
     error TokenNotWinner();
 
@@ -243,8 +243,10 @@ contract ConditionalLMSRMarketHook is BaseHook {
         private
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        if (params.amountSpecified >= 0) revert OnlyExactInputRedemptions();
-        uint256 amount = uint256(-params.amountSpecified);
+        // 1:1 redeem — amount is the same whether specified as input or output
+        uint256 amount = params.amountSpecified < 0
+            ? uint256(-params.amountSpecified)
+            : uint256(params.amountSpecified);
 
         poolManager.take(tokenIn, address(this), amount);
         conditionalTokens.redeem(Currency.unwrap(tokenIn), amount);
@@ -253,7 +255,13 @@ contract ConditionalLMSRMarketHook is BaseHook {
         SafeTransferLib.safeTransfer(Currency.unwrap(tokenOut), address(poolManager), amount);
         poolManager.settle();
 
-        return (this.beforeSwap.selector, toBeforeSwapDelta(int128(int256(amount)), -int128(int256(amount))), 0);
+        // exact-input: specified=tokenIn(+amount), unspecified=tokenOut(-amount)
+        // exact-output: specified=tokenOut(-amount), unspecified=tokenIn(+amount)
+        if (params.amountSpecified < 0) {
+            return (this.beforeSwap.selector, toBeforeSwapDelta(int128(int256(amount)), -int128(int256(amount))), 0);
+        } else {
+            return (this.beforeSwap.selector, toBeforeSwapDelta(-int128(int256(amount)), int128(int256(amount))), 0);
+        }
     }
 
     // compilation error stack too deep

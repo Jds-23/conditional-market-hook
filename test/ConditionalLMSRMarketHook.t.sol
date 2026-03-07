@@ -324,7 +324,7 @@ contract ConditionalLMSRMarketHookTest is BaseTest, IUnlockCallback {
         assertEq(hook.reserves(yesCurrency), (INITIAL_LIQUIDITY + buyCost) - sellCollateralOut, "Hook YES reserves after sell");
     }
 
-    function test_redeem_winner_post_resolution() public {
+    function test_redeem_exactInput_post_resolution() public {
         collateral.mint(address(poolManager), INITIAL_LIQUIDITY * 10);
 
         // Buy YES tokens
@@ -343,6 +343,27 @@ contract ConditionalLMSRMarketHookTest is BaseTest, IUnlockCallback {
 
         assertEq(collateral.balanceOf(address(this)) - colBefore, yesToRedeem, "Redeem: 1:1 collateral");
         assertEq(yesBefore - IERC20(Currency.unwrap(yesCurrency)).balanceOf(address(this)), yesToRedeem + yesToRedeem, "Redeem: YES decreased by transferred + settled");
+    }
+
+    function test_redeem_exactOutput_post_resolution() public {
+        collateral.mint(address(poolManager), INITIAL_LIQUIDITY * 10);
+
+        // Buy YES tokens
+        swapExactOutput(address(collateral), Currency.unwrap(yesCurrency), 100e6, type(uint256).max);
+
+        // Resolve: YES wins
+        conditionalMarkets.resolve(CONDITION_ID, Currency.unwrap(yesCurrency));
+
+        uint256 colToRedeem = 100e6;
+        uint256 colBefore = collateral.balanceOf(address(this));
+
+        // Pre-transfer YES tokens to PM (hook takes via PM.take)
+        IERC20(Currency.unwrap(yesCurrency)).transfer(address(poolManager), colToRedeem);
+
+        // Exact-output redeem: specify collateral amount to receive
+        swapExactOutput(Currency.unwrap(yesCurrency), address(collateral), colToRedeem, type(uint256).max);
+
+        assertEq(collateral.balanceOf(address(this)) - colBefore, colToRedeem, "Redeem: received exact collateral");
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
